@@ -1,0 +1,28 @@
+name: Hourly BTC Data Collection
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # Каждый час в 00 минут
+  workflow_dispatch:
+
+jobs:
+  collect-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+      - name: Install dependencies
+        run: |
+          pip install requests pandas
+      - name: Run script
+        run: python main.py
+      - name: Commit changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add funding_basis_data.csv
+          git commit -m "Update data for $(date -u '+%Y-%m-%d %H:00:00')" || echo "No changes to commit"
+          git push
