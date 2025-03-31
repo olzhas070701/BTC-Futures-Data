@@ -21,14 +21,7 @@ jobs:
           pip install requests pandas
       - name: Run script
         run: python main.py
-      - name: Commit and push changes
-        uses: actions/github-script@v6
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v4
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const execSync = require('child_process').execSync;
-            execSync('git config --local user.email "github-actions[bot]@users.noreply.github.com"');
-            execSync('git config --local user.name "github-actions[bot]"');
-            execSync('git add funding_basis_data.csv');
-            execSync('git commit -m "Update data for ' + new Date().toISOString().slice(0, 13) + ':00:00" || echo "No changes to commit"');
-            execSync('git push');
+          commit_message: "Update data for ${{ github.event.schedule || github.run_id }}"
