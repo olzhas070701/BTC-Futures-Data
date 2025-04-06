@@ -2,6 +2,7 @@ import requests
 import pandas as pd
 import os
 from datetime import datetime
+import pytz  # Добавляем pytz для часовых поясов
 
 CSV_FILE = "funding_basis_data.csv"
 
@@ -44,7 +45,11 @@ funding_rate = get_funding_rate()
 open_interest = get_open_interest()
 cvd = get_cvd()
 
-date = datetime.utcnow().strftime('%Y-%m-%d %H:00:00')
+# Устанавливаем часовой пояс Алматы (UTC+5)
+almaty_tz = pytz.timezone('Asia/Almaty')
+almaty_time = datetime.now(almaty_tz)
+# Форматируем время в Алматы до целого часа
+date = almaty_time.strftime('%Y-%m-%d %H:00:00')
 
 if df.empty or date not in df["date"].values:
     new_data = pd.DataFrame([{
@@ -58,6 +63,6 @@ if df.empty or date not in df["date"].values:
     }])
     df = pd.concat([df, new_data], ignore_index=True)
     df.to_csv(CSV_FILE, index=False)
-    print(f"✅ Данные за {date} записаны.")
+    print(f"✅ Данные за {date} записаны (время Алматы).")
 else:
-    print(f"⚠️ Данные за {date} уже есть.")
+    print(f"⚠️ Данные за {date} уже есть (время Алматы).")
