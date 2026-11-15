@@ -1,5 +1,4 @@
 import csv
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -105,7 +104,7 @@ def main():
 
     now = datetime.now(timezone.utc)
     row = {
-        "collected_at_utc": now.isoformat(timespec="seconds"),
+        "collected_at_utc": now.isoformat(timespec="minutes"),
         "collected_at_almaty": now.astimezone(ALMATY_TZ).isoformat(timespec="seconds"),
         "spot_inst_id": SPOT_INST_ID,
         "spot_price": spot_price,
