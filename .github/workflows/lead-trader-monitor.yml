@@ -1,0 +1,31 @@
+name: OKX Lead Trader Monitor
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: okx-lead-trader-monitor
+  cancel-in-progress: false
+
+jobs:
+  collect-lead-traders:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependency
+        run: pip install requests
+      - name: Collect public lead trader positions
+        run: python lead_trader_monitor.py
+      - name: Commit lead trader snapshots
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Record OKX lead trader positions"
