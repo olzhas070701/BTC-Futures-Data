@@ -1,68 +1,134 @@
-import requests
-import pandas as pd
+import csv
 import os
-from datetime import datetime
-import pytz  # Добавляем pytz для часовых поясов
+from datetime import datetime, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
 
-CSV_FILE = "funding_basis_data.csv"
+import requests
 
-def get_spot_price():
-    url = "https://www.okx.com/api/v5/market/ticker?instId=BTC-USDT"
-    response = requests.get(url, timeout=10).json()
-    return float(response["data"][0]["last"])
+BASE_URL = "https://www.okx.com"
+SPOT_INST_ID = "BTC-USDT"
+SWAP_INST_ID = "BTC-USDT-SWAP"
+OUTPUT_FILE = Path("market_snapshot_data.csv")
+ALMATY_TZ = ZoneInfo("Asia/Almaty")
+FIELDS = [
+    "collected_at_utc",
+    "collected_at_almaty",
+    "spot_inst_id",
+    "spot_price",
+    "swap_inst_id",
+    "swap_price",
+    "basis_usd",
+    "basis_pct",
+    "open_interest_contracts",
+    "open_interest_btc",
+    "open_interest_usd",
+    "funding_rate",
+    "funding_time_ms",
+    "spot_ticker_ts_ms",
+    "swap_ticker_ts_ms",
+    "open_interest_ts_ms",
+    "funding_response_ts_ms",
+]
 
-def get_futures_price():
-    url = "https://www.okx.com/api/v5/market/ticker?instId=BTC-USD-SWAP"
-    response = requests.get(url, timeout=10).json()
-    return float(response["data"][0]["last"])
+
+def okx_get(path, params):
+    response = requests.get(
+        f"{BASE_URL}{path}",
+        params=params,
+        timeout=20,
+        headers={"User-Agent": "BTC-Futures-Data/1.0"},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if payload.get("code") != "0":
+        raise RuntimeError(
+            f"OKX API error for {path}: code={payload.get('code')} "
+            f"msg={payload.get('msg')}"
+        )
+    data = payload.get("data") or []
+    if not data:
+        raise RuntimeError(f"OKX returned empty data for {path}")
+    return data
+
+
+def get_ticker(inst_id):
+    return okx_get(
+        "/api/v5/market/ticker",
+        {"instId": inst_id},
+    )[0]
+
 
 def get_open_interest():
-    url = "https://www.okx.com/api/v5/public/open-interest?instId=BTC-USD-SWAP"
-    response = requests.get(url, timeout=10).json()
-    return float(response["data"][0]["oi"])
+    return okx_get(
+        "/api/v5/public/open-interest",
+        {"instType": "SWAP", "instId": SWAP_INST_ID},
+    )[0]
+
 
 def get_funding_rate():
-    url = "https://www.okx.com/api/v5/public/funding-rate?instId=BTC-USD-SWAP"
-    response = requests.get(url, timeout=10).json()
-    return float(response["data"][0]["fundingRate"])
+    return okx_get(
+        "/api/v5/public/funding-rate",
+        {"instId": SWAP_INST_ID},
+    )[0]
 
-def get_cvd():
-    url = "https://www.okx.com/api/v5/market/history-trades?instId=BTC-USDT&limit=100"
-    response = requests.get(url, timeout=10).json()
-    buy_volume = sum(float(t["sz"]) for t in response["data"] if t["side"] == "buy")
-    sell_volume = sum(float(t["sz"]) for t in response["data"] if t["side"] == "sell")
-    return buy_volume - sell_volume
 
-if os.path.exists(CSV_FILE):
-    df = pd.read_csv(CSV_FILE)
-else:
-    df = pd.DataFrame(columns=["date", "spot_price", "futures_price", "basis", "funding_rate", "open_interest", "cvd"])
+def append_snapshot(row):
+    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    exists = OUTPUT_FILE.exists()
 
-spot_price = get_spot_price()
-futures_price = get_futures_price()
-basis = ((futures_price - spot_price) / spot_price) * 100
-funding_rate = get_funding_rate()
-open_interest = get_open_interest()
-cvd = get_cvd()
+    # Avoid duplicate rows if a scheduled workflow is retried in the same minute.
+    if exists:
+        with OUTPUT_FILE.open("r", newline="", encoding="utf-8") as file:
+            reader = csv.DictReader(file)
+            if any(item.get("collected_at_utc") == row["collected_at_utc"] for item in reader):
+                print(f"Snapshot already exists for {row['collected_at_utc']}; skipping.")
+                return
 
-# Устанавливаем часовой пояс Алматы (UTC+5)
-almaty_tz = pytz.timezone('Asia/Almaty')
-almaty_time = datetime.now(almaty_tz)
-# Форматируем время в Алматы до целого часа
-date = almaty_time.strftime('%Y-%m-%d %H:00:00')
+    with OUTPUT_FILE.open("a", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=FIELDS)
+        if not exists or OUTPUT_FILE.stat().st_size == 0:
+            writer.writeheader()
+        writer.writerow(row)
 
-if df.empty or date not in df["date"].values:
-    new_data = pd.DataFrame([{
-        "date": date,
+
+def main():
+    spot = get_ticker(SPOT_INST_ID)
+    swap = get_ticker(SWAP_INST_ID)
+    oi = get_open_interest()
+    funding = get_funding_rate()
+
+    spot_price = float(spot["last"])
+    swap_price = float(swap["last"])
+    basis_usd = swap_price - spot_price
+    basis_pct = (basis_usd / spot_price) * 100 if spot_price else 0.0
+
+    now = datetime.now(timezone.utc)
+    row = {
+        "collected_at_utc": now.isoformat(timespec="seconds"),
+        "collected_at_almaty": now.astimezone(ALMATY_TZ).isoformat(timespec="seconds"),
+        "spot_inst_id": SPOT_INST_ID,
         "spot_price": spot_price,
-        "futures_price": futures_price,
-        "basis": basis,
-        "funding_rate": funding_rate,
-        "open_interest": open_interest,
-        "cvd": cvd
-    }])
-    df = pd.concat([df, new_data], ignore_index=True)
-    df.to_csv(CSV_FILE, index=False)
-    print(f"✅ Данные за {date} записаны (время Алматы).")
-else:
-    print(f"⚠️ Данные за {date} уже есть (время Алматы).")
+        "swap_inst_id": SWAP_INST_ID,
+        "swap_price": swap_price,
+        "basis_usd": basis_usd,
+        "basis_pct": basis_pct,
+        "open_interest_contracts": oi.get("oi", ""),
+        "open_interest_btc": oi.get("oiCcy", ""),
+        "open_interest_usd": oi.get("oiUsd", ""),
+        "funding_rate": funding.get("fundingRate", ""),
+        "funding_time_ms": funding.get("fundingTime", ""),
+        "spot_ticker_ts_ms": spot.get("ts", ""),
+        "swap_ticker_ts_ms": swap.get("ts", ""),
+        "open_interest_ts_ms": oi.get("ts", ""),
+        "funding_response_ts_ms": funding.get("ts", ""),
+    }
+    append_snapshot(row)
+    print(
+        f"Saved {SWAP_INST_ID}: price={swap_price}, "
+        f"OI USD={row['open_interest_usd']}, funding={row['funding_rate']}"
+    )
+
+
+if __name__ == "__main__":
+    main()
