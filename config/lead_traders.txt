@@ -1,0 +1,4 @@
+# Add one OKX lead trader uniqueCode per line.
+# Find it on the trader's OKX profile/share page.
+# Do not put API keys, passwords, or other secrets here.
+# Example format only (not a real trader): ABCD1234EFGH5678
